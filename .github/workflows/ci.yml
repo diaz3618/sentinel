@@ -13,10 +13,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions/setup-rust@v1
         with:
-          toolchain: stable
-          override: true
+          rust-version: stable
       - name: Build all crates
         run: cargo build --workspace --all-targets --verbose
       - name: Run tests
