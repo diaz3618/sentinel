@@ -5,7 +5,6 @@
 ![Rust](https://img.shields.io/badge/rust-1.77%2B-orange)
 ![Docs](https://img.shields.io/badge/docs-available-brightgreen)
 
-[![CI](https://github.com/diaz3618/sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/diaz3618/sentinel/actions/workflows/ci.yml)
 
 # Sentinel: Linux Memory Guard Daemon & CLI
 
