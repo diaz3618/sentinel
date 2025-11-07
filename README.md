@@ -69,3 +69,13 @@ cargo build --release --workspace
 
 ## Example Config
 See `packaging/sentinel.example.toml` for all options and defaults.
+
+## Contributing
+
+Not much to contribute to, but if you have an idea or find a bug, go for it.
+
+## License
+
+This project is licensed under the MIT License.
+
+*Do whatever you want with it*
