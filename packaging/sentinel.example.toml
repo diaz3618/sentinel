@@ -1,0 +1,14 @@
+# Sentinel daemon configuration (TOML)
+
+reserve_mb = 512
+soft_threshold_pct = 15
+hard_threshold_pct = 5
+mode = "hybrid"                 # "kill" | "slow" | "hybrid"
+scan_interval_sec = 2
+exclude_names = ["sshd", "systemd", "sentinel"]
+max_actions_per_min = 4
+
+[cli]
+color = "auto"                  # auto|always|never
+unicode = "auto"                # auto|always|never
+table_max_width = 120

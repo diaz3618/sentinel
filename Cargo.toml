@@ -1,0 +1,35 @@
+[workspace]
+members = ["crates/core", "crates/daemon", "crates/cli"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["Daniel Diaz <you@example.com>"]
+homepage = "https://example.com/sentinel"
+repository = "https://example.com/sentinel"
+rust-version = "1.77"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+clap = { version = "4", features = ["derive"] }
+owo-colors = "4"
+atty = "0.2"
+humansize = "2"
+humantime = "2"
+comfy-table = "7"
+procfs = "0.16"
+nix = { version = "0.29", features = ["signal", "process", "user"] }
+users = "0.11"
+signal-hook = { version = "0.3", features = ["iterator", "extended-siginfo"] }
+# journald logger (optional; keep as feature in daemon)
+tracing-journald = "0.3"
+# simple syslog fallback (optional; not enabled by default)
+syslog = { version = "6", default-features = false, features = ["unix"] }
+
+assert_cmd = { version = "2", dev-dependencies = true }

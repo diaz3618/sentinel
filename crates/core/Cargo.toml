@@ -1,0 +1,14 @@
+[package]
+name = "sentinel-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+procfs = { workspace = true }
+nix = { workspace = true }
+users = { workspace = true }

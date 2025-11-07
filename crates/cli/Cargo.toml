@@ -1,0 +1,19 @@
+[package]
+name = "sentinelctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+owo-colors = { workspace = true }
+atty = { workspace = true }
+comfy-table = { workspace = true }
+humansize = { workspace = true }
+humantime = { workspace = true }
+sentinel-core = { path = "../core" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2"

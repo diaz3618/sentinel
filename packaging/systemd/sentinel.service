@@ -1,0 +1,23 @@
+[Unit]
+Description=Sentinel Memory Guard Daemon (preemptive OOM guard)
+After=network.target
+Documentation=man:sentinel(8)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sentinel
+Restart=always
+RestartSec=1
+User=sentinel
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_KILL CAP_SYS_NICE
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+PrivateDevices=true
+PrivateTmp=true
+OOMScoreAdjust=-1000
+Slice=sentinel.slice
+
+[Install]
+WantedBy=multi-user.target
