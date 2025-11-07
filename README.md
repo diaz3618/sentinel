@@ -11,7 +11,7 @@
 
 Sentinel is a Rust daemon and CLI tool for preemptively protecting Linux VMs from memory exhaustion. It monitors system memory, maintains a configurable reserve balloon, and takes staged actions before the system hits OOM.
 
-This exists because I got tired of abusing my VMs and getting locked out until it resolved itself or I force restart it (not ideal).
+This exists because I got tired of abusing my VMs and getting locked out until it resolved itself or I force restart it (not ideal). Sentinel keeps a memory reserve so critical services like SSH stay available even if the system runs out of RAM. Simple and effective 👍.
 
 ## Features
 - **Daemon (`sentinel`)**: Monitors `/proc/meminfo`, maintains reserve, classifies pressure, and acts before OOM (slow, stop, kill, cgroup integration).
