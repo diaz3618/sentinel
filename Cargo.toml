@@ -1,3 +1,5 @@
+[workspace.dependencies]
+assert_cmd = { version = "2", dev-dependencies = true }
 [workspace]
 members = ["crates/core", "crates/daemon", "crates/cli"]
 resolver = "2"
@@ -32,4 +34,3 @@ tracing-journald = "0.3"
 # simple syslog fallback (optional; not enabled by default)
 syslog = { version = "6", default-features = false, features = ["unix"] }
 
-assert_cmd = { version = "2", dev-dependencies = true }

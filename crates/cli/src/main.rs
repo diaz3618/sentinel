@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use owo_colors::OwoColorize;
 use comfy_table::{Table, presets::UTF8_FULL, ContentArrangement};
 use humansize::{format_size, BINARY};
 use tracing::Level;
@@ -10,10 +9,8 @@ use sentinel_core::{mem, procinfo, policy::{self, PressureState}};
 #[command(name="sentinelctl", version, about="Sentinel control and status CLI", long_about=None)]
 struct Cli {
     #[arg(long, default_value = "auto")]
-    #[arg(long, default_value = "auto")]
     color: String,
 
-    #[arg(long, default_value_t = true)]
     #[arg(long, default_value_t = true)]
     unicode: bool,
 
@@ -24,18 +21,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     Status,
-    Status,
     Top { #[arg(long, default_value_t = 10)] limit: usize },
-    Top { #[arg(long, default_value_t = 10)] limit: usize },
-    Simulate { #[arg(value_parser=["soft","hard"]) ] level: String, #[arg(long)] dry_run: bool },
-    Simulate { #[arg(value_parser=["soft","hard"]) ] level: String, #[arg(long)] dry_run: bool },
-    Config { #[arg(value_parser=["get","set")] ) op: String, key: Option<String>, value: Option<String> },
+    Simulate { #[arg(value_parser=["soft","hard"])] level: String, #[arg(long)] dry_run: bool },
     Config { #[arg(value_parser=["get","set"])] op: String, key: Option<String>, value: Option<String> },
     Logs { #[arg(long)] since: Option<String>, #[arg(long)] follow: bool },
-    Logs { #[arg(long)] since: Option<String>, #[arg(long)] follow: bool },
-    Reserve { #[arg(value_parser=["hold","release","rebuild"]) ] op: String },
     Reserve { #[arg(value_parser=["hold","release","rebuild"])] op: String },
-    Slices { #[arg(long)] tree: bool },
     Slices { #[arg(long)] tree: bool },
 }
 
@@ -69,7 +59,11 @@ fn config_cmd(op: &str, key: Option<String>, value: Option<String>) -> Result<()
     use sentinel_core::config::Config;
     use std::path::PathBuf;
     let _value = value;
-    let cfg_path = PathBuf::from("/etc/memsentinel.toml");
+    let cfg_path = if std::path::Path::new("/etc/memsentinel.toml").exists() {
+        PathBuf::from("/etc/memsentinel.toml")
+    } else {
+        PathBuf::from("memsentinel.toml")
+    };
     match op {
         "get" => {
             let cfg = Config::load_from(&cfg_path)?;
@@ -131,7 +125,7 @@ fn slices_cmd(tree: bool) -> Result<()> {
     Ok(())
 }
 
-fn status(unicode: bool) -> Result<()> {
+fn status(_unicode: bool) -> Result<()> {
     println!("Sentinel — Status");
     match mem::sample() {
         Ok(m) => {

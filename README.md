@@ -21,16 +21,33 @@ This exists because I got tired of abusing my VMs and getting locked out until i
 
 ## Usage
 
+### Dev (testing)
 ```bash
-# CLI
+# Run CLI in dev mode
 cargo run --bin sentinelctl status
 cargo run --bin sentinelctl top --limit 5
 cargo run --bin sentinelctl simulate soft --dry-run
 cargo run --bin sentinelctl config get reserve_mb
 cargo run --bin sentinelctl reserve hold
 
-# Daemon
+# Run daemon in dev mode
 cargo run --bin sentinel
+```
+
+### Production
+```bash
+# Build release binaries
+cargo build --release --workspace
+
+# Run CLI
+./target/release/sentinelctl status
+./target/release/sentinelctl top --limit 5
+./target/release/sentinelctl simulate soft --dry-run
+./target/release/sentinelctl config get reserve_mb
+./target/release/sentinelctl reserve hold
+
+# Run daemon
+./target/release/sentinel
 ```
 
 ## CLI Commands
