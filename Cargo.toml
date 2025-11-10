@@ -1,5 +1,3 @@
-[workspace.dependencies]
-assert_cmd = { version = "2", dev-dependencies = true }
 [workspace]
 members = ["crates/core", "crates/daemon", "crates/cli"]
 resolver = "2"
@@ -13,6 +11,7 @@ repository = "https://example.com/sentinel"
 rust-version = "1.77"
 
 [workspace.dependencies]
+assert_cmd = { version = "2", dev-dependencies = true }
 anyhow = "1"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
