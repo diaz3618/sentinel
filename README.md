@@ -5,6 +5,7 @@
 ![Rust](https://img.shields.io/badge/rust-1.77%2B-orange)
 ![Docs](https://img.shields.io/badge/docs-available-brightgreen)
 
+**📖 [Documentation & Examples](docs/USAGE.md)**
 
 # Sentinel: Linux Memory Guard Daemon & CLI
 
@@ -27,6 +28,7 @@ sudo ./install.sh
 ```
 
 This will:
+- Detect existing installations and offer clean reinstall
 - Install Rust if not present
 - Install system dependencies
 - Build release binaries
@@ -44,6 +46,12 @@ sudo ./uninstall.sh
 
 ## Usage
 
+### Quick Start
+Create your configuration file interactively:
+```bash
+sentinelctl config init
+```
+
 ### Dev (testing)
 ```bash
 # Run CLI in dev mode
@@ -51,6 +59,7 @@ cargo run --bin sentinelctl status
 cargo run --bin sentinelctl top --limit 5
 cargo run --bin sentinelctl simulate soft --dry-run
 cargo run --bin sentinelctl config get reserve_mb
+cargo run --bin sentinelctl config init
 cargo run --bin sentinelctl reserve hold
 
 # Run daemon in dev mode
@@ -77,7 +86,8 @@ cargo build --release --workspace
 - `status` — Show current memory, reserve, thresholds, and pressure state
 - `top` — List top RSS processes (with exclusions)
 - `simulate` — Show what actions would be taken at soft/hard threshold
-- `config` — Get/set config keys (TOML)
+- `config init` — Interactive wizard to create configuration file
+- `config get/set` — Get/set config keys (TOML)
 - `logs` — Stream recent actions (journald, stub)
 - `reserve` — Hold/release/rebuild reserve balloon
 - `slices` — Inspect cgroup v2 slices (stub)

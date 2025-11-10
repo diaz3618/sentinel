@@ -4,6 +4,7 @@ use comfy_table::{Table, presets::UTF8_FULL, ContentArrangement};
 use humansize::{format_size, BINARY};
 use tracing::Level;
 use sentinel_core::{mem, procinfo, policy::{self, PressureState}};
+use std::io::{self, Write};
 
 #[derive(Parser, Debug)]
 #[command(name="sentinelctl", version, about="Sentinel control and status CLI", long_about=None)]
@@ -23,7 +24,7 @@ enum Commands {
     Status,
     Top { #[arg(long, default_value_t = 10)] limit: usize },
     Simulate { #[arg(value_parser=["soft","hard"])] level: String, #[arg(long)] dry_run: bool },
-    Config { #[arg(value_parser=["get","set"])] op: String, key: Option<String>, value: Option<String> },
+    Config { #[arg(value_parser=["get","set","init"])] op: String, key: Option<String>, value: Option<String> },
     Logs { #[arg(long)] since: Option<String>, #[arg(long)] follow: bool },
     Reserve { #[arg(value_parser=["hold","release","rebuild"])] op: String },
     Slices { #[arg(long)] tree: bool },
@@ -65,6 +66,9 @@ fn config_cmd(op: &str, key: Option<String>, value: Option<String>) -> Result<()
         PathBuf::from("memsentinel.toml")
     };
     match op {
+        "init" => {
+            init_config_interactive()?;
+        }
         "get" => {
             let cfg = Config::load_from(&cfg_path)?;
             if let Some(k) = key {
@@ -170,4 +174,140 @@ fn top(limit: usize, unicode: bool) -> Result<()> {
 fn simulate(level: &str, _dry: bool) -> Result<()> {
     println!("Simulating {} threshold response (dry-run)", level);
     Ok(())
+}
+
+fn init_config_interactive() -> Result<()> {
+    use sentinel_core::config::Config;
+    use std::fs;
+    use std::path::Path;
+
+    println!("🔧 Sentinel Configuration Wizard");
+    println!("================================\n");
+
+    let target_path = "/etc/memsentinel.toml";
+    
+    // Check if config already exists
+    if Path::new(target_path).exists() {
+        print!("Config file already exists at {}. Overwrite? (y/N): ", target_path);
+        io::stdout().flush()?;
+        let mut response = String::new();
+        io::stdin().read_line(&mut response)?;
+        if !response.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    // Use defaults as starting point
+    let mut cfg = Config::default();
+
+    // Interactive prompts
+    println!("\n📊 Memory Reserve Configuration");
+    cfg.reserve_mb = prompt_u64("Reserve memory (MB)", cfg.reserve_mb)?;
+    
+    println!("\n⚠️  Threshold Configuration");
+    cfg.soft_threshold_pct = prompt_u8("Soft threshold (% available)", cfg.soft_threshold_pct)?;
+    cfg.hard_threshold_pct = prompt_u8("Hard threshold (% available)", cfg.hard_threshold_pct)?;
+    
+    println!("\n🎯 Action Mode");
+    println!("  - kill: Terminate processes aggressively");
+    println!("  - slow: Pause processes with SIGSTOP");
+    println!("  - hybrid: Use both strategies");
+    cfg.mode = prompt_string("Mode (kill/slow/hybrid)", &cfg.mode)?;
+    
+    println!("\n⏱️  Monitoring Configuration");
+    cfg.scan_interval_sec = prompt_u64("Scan interval (seconds)", cfg.scan_interval_sec)?;
+    cfg.max_actions_per_min = prompt_u32("Max actions per minute", cfg.max_actions_per_min)?;
+    
+    println!("\n🛡️  Protected Processes");
+    println!("Current: {:?}", cfg.exclude_names);
+    print!("Add more protected process names (comma-separated, or press Enter to skip): ");
+    io::stdout().flush()?;
+    let mut exclude_input = String::new();
+    io::stdin().read_line(&mut exclude_input)?;
+    if !exclude_input.trim().is_empty() {
+        for name in exclude_input.trim().split(',') {
+            let trimmed = name.trim().to_string();
+            if !trimmed.is_empty() && !cfg.exclude_names.contains(&trimmed) {
+                cfg.exclude_names.push(trimmed);
+            }
+        }
+    }
+
+    // Serialize to TOML
+    let toml_content = toml::to_string_pretty(&cfg)?;
+    
+    println!("\n📝 Generated configuration:");
+    println!("---");
+    println!("{}", toml_content);
+    println!("---");
+    
+    // Try to write to /etc first, fall back to local if permission denied
+    match fs::write(target_path, &toml_content) {
+        Ok(_) => {
+            println!("✅ Configuration written to {}", target_path);
+        }
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            let local_path = "memsentinel.toml";
+            fs::write(local_path, &toml_content)?;
+            println!("⚠️  Permission denied for {}.", target_path);
+            println!("✅ Configuration written to {} instead.", local_path);
+            println!("💡 Run: sudo mv {} {}", local_path, target_path);
+        }
+        Err(e) => return Err(e.into()),
+    }
+    
+    Ok(())
+}
+
+fn prompt_u64(prompt: &str, default: u64) -> Result<u64> {
+    print!("{} [{}]: ", prompt, default);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default)
+    } else {
+        Ok(trimmed.parse()?)
+    }
+}
+
+fn prompt_u8(prompt: &str, default: u8) -> Result<u8> {
+    print!("{} [{}]: ", prompt, default);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default)
+    } else {
+        Ok(trimmed.parse()?)
+    }
+}
+
+fn prompt_u32(prompt: &str, default: u32) -> Result<u32> {
+    print!("{} [{}]: ", prompt, default);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default)
+    } else {
+        Ok(trimmed.parse()?)
+    }
+}
+
+fn prompt_string(prompt: &str, default: &str) -> Result<String> {
+    print!("{} [{}]: ", prompt, default);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
 }

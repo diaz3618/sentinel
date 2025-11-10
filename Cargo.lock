@@ -733,6 +733,7 @@ dependencies = [
  "humantime",
  "owo-colors",
  "sentinel-core",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
