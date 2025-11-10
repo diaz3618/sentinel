@@ -86,11 +86,22 @@ table_max_width = 120
 
 ## Usage
 ### Daemon
-Start the daemon:
+Start the daemon in foreground:
 ```bash
 sudo sentinel
 ```
-Reload config:
+
+Start the daemon in background (silent mode):
+```bash
+sudo sentinel --silent
+```
+
+Stop the daemon:
+```bash
+sudo sentinel --stop
+```
+
+Reload config (if running in foreground):
 ```bash
 sudo kill -SIGHUP $(pidof sentinel)
 ```

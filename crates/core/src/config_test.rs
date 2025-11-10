@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
     use std::fs::File;
     use std::io::Write;
     use std::path::Path;
@@ -18,7 +19,7 @@ mod tests {
         let path = Path::new("/tmp/test_memsentinel.toml");
         let mut file = File::create(&path).unwrap();
         file.write_all(toml.as_bytes()).unwrap();
-        let cfg = crate::config::Config::load_from(path).unwrap();
+        let cfg = Config::load_from(path).unwrap();
         assert_eq!(cfg.reserve_mb, 256);
         assert_eq!(cfg.soft_threshold_pct, 10);
         assert_eq!(cfg.hard_threshold_pct, 3);

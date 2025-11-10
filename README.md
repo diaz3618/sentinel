@@ -80,7 +80,18 @@ cargo build --release --workspace
 
 # Run daemon
 ./target/release/sentinel
+
+# Run daemon in background (silent mode)
+./target/release/sentinel --silent
+
+# Stop daemon
+./target/release/sentinel --stop
 ```
+
+## Daemon Commands
+- `sentinel` — Run daemon in foreground
+- `sentinel --silent` — Run daemon in background (daemonize)
+- `sentinel --stop` — Stop running daemon
 
 ## CLI Commands
 - `status` — Show current memory, reserve, thresholds, and pressure state

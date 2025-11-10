@@ -697,6 +697,8 @@ name = "sentinel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
+ "libc",
  "procfs",
  "sentinel-core",
  "serde",

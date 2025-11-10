@@ -12,7 +12,7 @@ struct Cli {
     #[arg(long, default_value = "auto")]
     color: String,
 
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     unicode: bool,
 
     #[command(subcommand)]
