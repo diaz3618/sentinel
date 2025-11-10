@@ -19,6 +19,29 @@ This exists because I got tired of abusing my VMs and getting locked out until i
 - **Systemd**: Example unit and slice files in `packaging/systemd/` for secure deployment.
 - **Tests**: Unit and integration tests for all core logic and CLI rendering.
 
+## Installation
+
+### Quick Install (Recommended)
+```bash
+sudo ./install.sh
+```
+
+This will:
+- Install Rust if not present
+- Install system dependencies
+- Build release binaries
+- Install binaries to `/usr/local/bin`
+- Copy default config to `/etc/memsentinel.toml`
+- Install systemd service (if available)
+
+### Manual Install
+See "Production" usage below for manual build and deployment.
+
+### Uninstall
+```bash
+sudo ./uninstall.sh
+```
+
 ## Usage
 
 ### Dev (testing)
