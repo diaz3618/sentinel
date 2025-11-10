@@ -3,8 +3,9 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Table, presets::UTF8_FULL, ContentArrangement};
 use humansize::{format_size, BINARY};
 use tracing::Level;
-use sentinel_core::{mem, procinfo, policy::{self, PressureState}};
+use sentinel_core::{mem, procinfo, policy::{self, PressureState}, psi::PSIMetrics};
 use std::io::{self, Write};
+use serde::Serialize;
 
 #[derive(Parser, Debug)]
 #[command(name="sentinelctl", version, about="Sentinel control and status CLI", long_about=None)]
@@ -21,9 +22,26 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Status,
-    Top { #[arg(long, default_value_t = 10)] limit: usize },
-    Simulate { #[arg(value_parser=["soft","hard"])] level: String, #[arg(long)] dry_run: bool },
+    Status {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        watch: bool,
+    },
+    Top {
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    Simulate {
+        #[arg(value_parser=["soft","hard"])]
+        level: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        explain: bool,
+    },
     Config { #[arg(value_parser=["get","set","init"])] op: String, key: Option<String>, value: Option<String> },
     Logs { #[arg(long)] since: Option<String>, #[arg(long)] follow: bool },
     Reserve { #[arg(value_parser=["hold","release","rebuild"])] op: String },
@@ -35,9 +53,9 @@ fn main() {
     let result = std::panic::catch_unwind(|| {
         let cli = Cli::parse();
         match cli.cmd {
-            Commands::Status => status(cli.unicode),
-            Commands::Top { limit } => top(limit, cli.unicode),
-            Commands::Simulate { level, dry_run } => simulate(&level, dry_run),
+            Commands::Status { json, watch } => status(cli.unicode, json, watch),
+            Commands::Top { limit, json } => top(limit, cli.unicode, json),
+            Commands::Simulate { level, dry_run, explain } => simulate(&level, dry_run, explain),
             Commands::Config { op, key, value } => config_cmd(&op, key, value),
             Commands::Logs { since, follow } => logs_cmd(since, follow),
             Commands::Reserve { op } => reserve_cmd(&op),
@@ -129,7 +147,61 @@ fn slices_cmd(tree: bool) -> Result<()> {
     Ok(())
 }
 
-fn status(_unicode: bool) -> Result<()> {
+fn status(_unicode: bool, json: bool, watch: bool) -> Result<()> {
+    loop {
+        if json {
+            status_json()?;
+        } else {
+            status_table()?;
+        }
+        
+        if !watch {
+            break;
+        }
+        
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if !json {
+            print!("\x1B[2J\x1B[1;1H");
+        }
+    }
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct StatusOutput {
+    state: String,
+    avail_pct: f64,
+    mem_total_bytes: u64,
+    mem_available_bytes: u64,
+    mem_used_bytes: u64,
+    psi_available: bool,
+    psi_some_avg10: Option<f64>,
+    psi_full_avg10: Option<f64>,
+}
+
+fn status_json() -> Result<()> {
+    let m = mem::sample()?;
+    let state = policy::classify(m.avail_pct, 15, 5);
+    let used = m.mem_total.saturating_sub(m.mem_available);
+    
+    let psi_metrics = PSIMetrics::sample().ok();
+    
+    let output = StatusOutput {
+        state: format!("{:?}", state),
+        avail_pct: m.avail_pct,
+        mem_total_bytes: m.mem_total * 1024,
+        mem_available_bytes: m.mem_available * 1024,
+        mem_used_bytes: used * 1024,
+        psi_available: psi_metrics.is_some(),
+        psi_some_avg10: psi_metrics.as_ref().map(|p| p.some_avg10),
+        psi_full_avg10: psi_metrics.as_ref().map(|p| p.full_avg10),
+    };
+    
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn status_table() -> Result<()> {
     println!("Sentinel — Status");
     match mem::sample() {
         Ok(m) => {
@@ -146,10 +218,18 @@ fn status(_unicode: bool) -> Result<()> {
             table.add_row(vec![
                 colorized,
                 format!("{:.0}%", m.avail_pct),
-                format_size(m.mem_total as u64, BINARY),
-                format_size(used as u64, BINARY),
+                format_size(m.mem_total as u64 * 1024, BINARY),
+                format_size(used as u64 * 1024, BINARY),
             ]);
             println!("{}", table);
+            
+            if let Ok(psi) = PSIMetrics::sample() {
+                println!("\nPSI Memory Pressure:");
+                println!("  some avg10: {:.2}%  avg60: {:.2}%  avg300: {:.2}%",
+                         psi.some_avg10, psi.some_avg60, psi.some_avg300);
+                println!("  full avg10: {:.2}%  avg60: {:.2}%  avg300: {:.2}%",
+                         psi.full_avg10, psi.full_avg60, psi.full_avg300);
+            }
         }
         Err(e) => {
             println!("ERROR: Could not sample memory: {}", e);
@@ -160,19 +240,89 @@ fn status(_unicode: bool) -> Result<()> {
     Ok(())
 }
 
-fn top(limit: usize, unicode: bool) -> Result<()> {
-    let mut table = Table::new();
-    if unicode { table.load_preset(UTF8_FULL); }
-    table.set_header(vec!["PID","NAME","RSS"]);
-    for p in procinfo::top_processes(limit, &vec!["sshd".into(), "systemd".into(), "sentinel".into()])? {
-        table.add_row(vec![p.pid.to_string(), p.name, humansize::format_size(p.rss_bytes, BINARY)]);
+fn top(limit: usize, unicode: bool, json: bool) -> Result<()> {
+    let procs = procinfo::top_processes(limit, &vec!["sshd".into(), "systemd".into(), "sentinel".into()])?;
+    
+    if json {
+        #[derive(Serialize)]
+        struct TopOutput {
+            pid: i32,
+            name: String,
+            rss_bytes: u64,
+        }
+        
+        let output: Vec<TopOutput> = procs.iter().map(|p| TopOutput {
+            pid: p.pid,
+            name: p.name.clone(),
+            rss_bytes: p.rss_bytes,
+        }).collect();
+        
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let mut table = Table::new();
+        if unicode { table.load_preset(UTF8_FULL); }
+        table.set_header(vec!["PID","NAME","RSS"]);
+        for p in procs {
+            table.add_row(vec![p.pid.to_string(), p.name, humansize::format_size(p.rss_bytes, BINARY)]);
+        }
+        println!("{}", table);
     }
-    println!("{}", table);
+    
     Ok(())
 }
 
-fn simulate(level: &str, _dry: bool) -> Result<()> {
-    println!("Simulating {} threshold response (dry-run)", level);
+fn simulate(level: &str, dry_run: bool, explain: bool) -> Result<()> {
+    use sentinel_core::config::Config;
+    
+    println!("Simulating {} threshold response{}", level, if dry_run { " (dry-run)" } else { "" });
+    
+    if explain {
+        let cfg = Config::default();
+        let m = mem::sample()?;
+        
+        println!("\n=== Current Memory State ===");
+        println!("Total: {} KB", m.mem_total);
+        println!("Available: {} KB ({:.1}%)", m.mem_available, m.avail_pct);
+        
+        if let Ok(psi) = PSIMetrics::sample() {
+            println!("\n=== PSI Metrics ===");
+            println!("some avg10: {:.2}%", psi.some_avg10);
+            println!("full avg10: {:.2}%", psi.full_avg10);
+        }
+        
+        println!("\n=== Process Badness Scoring ===");
+        match procinfo::processes_with_badness(
+            &cfg.exclude_names,
+            &cfg.protected_units,
+            m.mem_total * 1024,
+        ) {
+            Ok(procs) => {
+                println!("{:<8} {:<20} {:<12} {:<10} {:<15} {:<10}",
+                         "PID", "NAME", "RSS (MB)", "OOM ADJ", "SLICE", "BADNESS");
+                println!("{}", "-".repeat(85));
+                
+                for proc in procs.iter().take(10) {
+                    println!("{:<8} {:<20} {:<12} {:<10} {:<15} {:<10.1}",
+                             proc.pid,
+                             proc.name,
+                             proc.rss_bytes / (1024*1024),
+                             proc.oom_score_adj,
+                             format!("{:?}", proc.cgroup_slice),
+                             proc.badness_score);
+                }
+                
+                if let Some(victim) = procs.first() {
+                    println!("\n→ Target selected: PID {} ({})", victim.pid, victim.name);
+                    println!("  Badness score: {:.1}", victim.badness_score);
+                    println!("  Cgroup: {:?} / {:?}", victim.cgroup_slice, victim.cgroup_unit);
+                }
+            }
+            Err(e) => {
+                println!("Error enumerating processes: {}", e);
+            }
+        }
+    }
+    
     Ok(())
 }
 
@@ -186,7 +336,6 @@ fn init_config_interactive() -> Result<()> {
 
     let target_path = "/etc/memsentinel.toml";
     
-    // Check if config already exists
     if Path::new(target_path).exists() {
         print!("Config file already exists at {}. Overwrite? (y/N): ", target_path);
         io::stdout().flush()?;
@@ -198,10 +347,8 @@ fn init_config_interactive() -> Result<()> {
         }
     }
 
-    // Use defaults as starting point
     let mut cfg = Config::default();
 
-    // Interactive prompts
     println!("\n📊 Memory Reserve Configuration");
     cfg.reserve_mb = prompt_u64("Reserve memory (MB)", cfg.reserve_mb)?;
     
@@ -234,7 +381,6 @@ fn init_config_interactive() -> Result<()> {
         }
     }
 
-    // Serialize to TOML
     let toml_content = toml::to_string_pretty(&cfg)?;
     
     println!("\n📝 Generated configuration:");
@@ -242,7 +388,6 @@ fn init_config_interactive() -> Result<()> {
     println!("{}", toml_content);
     println!("---");
     
-    // Try to write to /etc first, fall back to local if permission denied
     match fs::write(target_path, &toml_content) {
         Ok(_) => {
             println!("✅ Configuration written to {}", target_path);

@@ -5,7 +5,15 @@ use signal_hook::iterator::Signals;
 use tracing::{info, warn, error, Level};
 use clap::Parser;
 
-use sentinel_core::{config::Config, mem, policy::{self, PressureState}, reserve};
+use sentinel_core::{
+    config::Config, 
+    mem, 
+    policy::{self, PressureState}, 
+    reserve,
+    psi::PSIMetrics,
+    procinfo,
+    actions,
+};
 
 const PID_FILE: &str = "/var/run/sentinel.pid";
 
@@ -41,6 +49,15 @@ fn main() -> Result<()> {
     let cfg_path = PathBuf::from("/etc/memsentinel.toml");
     let mut cfg = Config::load_from(&cfg_path).unwrap_or_default();
     info!(?cfg_path, "loaded config or default");
+    
+    let psi_available = PSIMetrics::is_available();
+    if cfg.psi_enabled && !psi_available {
+        warn!("PSI requested but /proc/pressure/memory not available (kernel < 4.20?)");
+        cfg.psi_enabled = false;
+    }
+    if psi_available {
+        info!(psi_enabled = cfg.psi_enabled, "PSI support detected");
+    }
 
     if !reserve::is_held() {
         reserve::hold(cfg.reserve_mb);
@@ -86,7 +103,21 @@ fn main() -> Result<()> {
             Ok(s) => s,
             Err(e) => { error!(error=%e, "meminfo read error"); std::thread::sleep(Duration::from_secs(1)); continue; }
         };
-        let state = policy::classify(m.avail_pct, cfg.soft_threshold_pct, cfg.hard_threshold_pct);
+        
+        let psi_metrics = if cfg.psi_enabled {
+            PSIMetrics::sample().ok()
+        } else {
+            None
+        };
+        
+        let state = policy::classify_with_psi(
+            m.avail_pct,
+            cfg.soft_threshold_pct,
+            cfg.hard_threshold_pct,
+            psi_metrics.as_ref(),
+            cfg.psi_soft_pct,
+            cfg.psi_hard_pct,
+        );
 
         match state {
             PressureState::Healthy => {
@@ -98,13 +129,64 @@ fn main() -> Result<()> {
             PressureState::Soft => {
                 if reserve::is_held() {
                     reserve::release();
-                    warn!("soft: released reserve");
+                    if let Some(ref psi) = psi_metrics {
+                        warn!(
+                            avail_pct = %m.avail_pct,
+                            psi_avg10 = %psi.some_avg10,
+                            "soft pressure: released reserve"
+                        );
+                    } else {
+                        warn!(avail_pct = %m.avail_pct, "soft pressure: released reserve");
+                    }
                 }
             }
             PressureState::Hard => {
                 if reserve::is_held() {
                     reserve::release();
-                    warn!("hard: released reserve");
+                }
+                
+                if let Some(ref psi) = psi_metrics {
+                    warn!(
+                        avail_pct = %m.avail_pct,
+                        psi_avg10 = %psi.some_avg10,
+                        psi_full_avg10 = %psi.full_avg10,
+                        "hard pressure detected"
+                    );
+                } else {
+                    warn!(avail_pct = %m.avail_pct, "hard pressure detected");
+                }
+                
+                if cfg.mode != "watch" {
+                    match procinfo::processes_with_badness(
+                        &cfg.exclude_names,
+                        &cfg.protected_units,
+                        m.total_kb * 1024,
+                    ) {
+                        Ok(procs) => {
+                            if let Some(victim) = procs.first() {
+                                info!(
+                                    pid = victim.pid,
+                                    name = %victim.name,
+                                    rss_mb = victim.rss_bytes / (1024*1024),
+                                    badness = %victim.badness_score,
+                                    slice = ?victim.cgroup_slice,
+                                    unit = ?victim.cgroup_unit,
+                                    "selected target for action"
+                                );
+                                
+                                if cfg.mode == "kill" || cfg.mode == "hybrid" {
+                                    if let Err(e) = actions::kill_process(victim.pid) {
+                                        error!(error = %e, "failed to kill process");
+                                    } else {
+                                        info!(pid = victim.pid, "killed process");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = %e, "failed to enumerate processes");
+                        }
+                    }
                 }
             }
         }
@@ -112,17 +194,14 @@ fn main() -> Result<()> {
         std::thread::sleep(Duration::from_secs(cfg.scan_interval_sec));
     }
 
-    // Clean up PID file on exit
     let _ = fs::remove_file(PID_FILE);
 
     Ok(())
 }
 
 fn daemonize() -> Result<()> {
-    // Check if already running
     if let Ok(pid_str) = fs::read_to_string(PID_FILE) {
         if let Ok(pid) = pid_str.trim().parse::<i32>() {
-            // Check if process is still running
             if process::Command::new("kill")
                 .args(["-0", &pid.to_string()])
                 .output()
@@ -135,34 +214,29 @@ fn daemonize() -> Result<()> {
         }
     }
 
-    // Fork and detach
     unsafe {
         let pid = libc::fork();
         if pid < 0 {
             return Err(anyhow::anyhow!("Fork failed"));
         }
         if pid > 0 {
-            // Parent process - write PID and exit
             fs::write(PID_FILE, format!("{}\n", pid))?;
             println!("Sentinel started in background (PID {})", pid);
             process::exit(0);
         }
         
-        // Child process continues
-        // Create new session
+        // Child - create new session and detach
         if libc::setsid() < 0 {
             return Err(anyhow::anyhow!("setsid failed"));
         }
 
-        // Change to root directory
         std::env::set_current_dir("/")?;
 
-        // Close standard file descriptors
+        // Redirect standard FDs to /dev/null
         libc::close(0);
         libc::close(1);
         libc::close(2);
 
-        // Reopen them to /dev/null
         let devnull = std::ffi::CString::new("/dev/null").unwrap();
         libc::open(devnull.as_ptr(), libc::O_RDONLY);
         libc::open(devnull.as_ptr(), libc::O_WRONLY);
@@ -179,25 +253,23 @@ fn stop_daemon() -> Result<()> {
     let pid = pid_str.trim().parse::<i32>()
         .map_err(|_| anyhow::anyhow!("Invalid PID file"))?;
 
-    // Send SIGTERM
     let result = unsafe { libc::kill(pid, libc::SIGTERM) };
     
     if result == 0 {
         println!("Stopping sentinel (PID {})...", pid);
         
-        // Wait up to 10 seconds for process to terminate
+        // Wait up to 10 seconds for graceful shutdown
         for _ in 0..100 {
             std::thread::sleep(Duration::from_millis(100));
             let check = unsafe { libc::kill(pid, 0) };
             if check != 0 {
-                // Process is gone
                 let _ = fs::remove_file(PID_FILE);
                 println!("Sentinel stopped successfully");
                 return Ok(());
             }
         }
         
-        // Force kill if still running
+        // SIGKILL if still running
         println!("Process did not stop gracefully, forcing...");
         unsafe { libc::kill(pid, libc::SIGKILL) };
         let _ = fs::remove_file(PID_FILE);

@@ -1,0 +1,32 @@
+# Sentinel configuration for systems without swap
+# More aggressive thresholds since there's no swap buffer
+
+reserve_mb = 1024
+soft_threshold_pct = 20
+hard_threshold_pct = 10
+mode = "slow"
+scan_interval_sec = 1
+
+exclude_names = [
+    "sshd",
+    "systemd",
+    "sentinel",
+]
+
+max_actions_per_min = 5
+
+# PSI is critical without swap - act faster
+psi_enabled = true
+psi_soft_pct = 8.0
+psi_hard_pct = 20.0
+
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+    "ssh.service",
+]
+
+[cli]
+color = "auto"
+unicode = "auto"
+table_max_width = 120

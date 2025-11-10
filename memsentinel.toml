@@ -10,6 +10,18 @@ exclude_names = [
 ]
 max_actions_per_min = 4
 
+# PSI (Pressure Stall Information) settings - requires kernel >= 4.20
+psi_enabled = true
+psi_soft_pct = 10.0
+psi_hard_pct = 30.0
+
+# Protected systemd units that should never be killed
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+    "ssh.service",
+]
+
 [cli]
 color = "auto"
 unicode = "auto"

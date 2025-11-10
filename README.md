@@ -1,125 +1,186 @@
+sentinel - Linux Memory Guard
+=============================
 
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.77%2B-orange)](https://www.rust-lang.org/)
 
-# Badges
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Rust](https://img.shields.io/badge/rust-1.77%2B-orange)
-![Docs](https://img.shields.io/badge/docs-available-brightgreen)
+**A preemptive OOM guard that keeps your SSH session alive.**
 
-**📖 [Documentation & Examples](docs/USAGE.md)**
+Sentinel monitors system memory and intervenes before the kernel's OOM killer freezes your machine. It maintains a memory reserve balloon so critical services like SSH stay responsive when RAM runs out.
 
-# Sentinel: Linux Memory Guard Daemon & CLI
+Why does this exist? I got tired of my VMs becoming completely unresponsive during memory pressure, having to wait forever or force-restart them. Sentinel solves this by keeping a reserve and taking early action.
 
-Sentinel is a Rust daemon and CLI tool for preemptively protecting Linux VMs from memory exhaustion. It monitors system memory, maintains a configurable reserve balloon, and takes staged actions before the system hits OOM.
+**Quick links:** [Installation](#installation) | [Documentation](docs/USAGE.md) | [Configuration](#configuration)
 
-This exists because I got tired of abusing my VMs and getting locked out until it resolved itself or I force restart it (not ideal). Sentinel keeps a memory reserve so critical services like SSH stay available even if the system runs out of RAM. Simple and effective 👍.
+## What does it do
+
+Sentinel checks available memory and swap (plus PSI metrics on modern kernels) multiple times per second. When pressure builds, it:
+
+1. **Soft pressure** (≤15% available): Releases the reserve balloon
+2. **Hard pressure** (≤5% available): Selects and terminates the worst offender
+
+The "worst offender" is chosen using a badness score that combines:
+- Memory usage (RSS)
+- Kernel's OOM score adjustment
+- Cgroup priority (prefers killing user apps over system services)
+
+This runs in userspace, not as a kernel module. It's written in Rust with no runtime dependencies.
 
 ## Features
-- **Daemon (`sentinel`)**: Monitors `/proc/meminfo`, maintains reserve, classifies pressure, and acts before OOM (slow, stop, kill, cgroup integration).
-- **CLI (`sentinelctl`)**: Status, top processes, simulate actions, config get/set, logs, reserve control, cgroup slice inspection.
-- **Config**: TOML config at `/etc/memsentinel.toml` (see `packaging/sentinel.example.toml`). Live reload on SIGHUP.
-- **Systemd**: Example unit and slice files in `packaging/systemd/` for secure deployment.
-- **Tests**: Unit and integration tests for all core logic and CLI rendering.
+
+- Monitors `/proc/meminfo` and PSI (Pressure Stall Information) on Linux 4.20+
+- Maintains a configurable memory reserve (default 512 MB)
+- Respects systemd cgroup slices — protects SSH, databases, web servers
+- Multiple operating modes: watch, slow, kill, hybrid
+- Live config reload (SIGHUP)
+- CLI tool for status, top processes, simulation, and config management
+- Hardened systemd unit with minimal capabilities
+
+## Requirements
+
+- Linux 4.20+ recommended (for PSI support; works on older kernels without PSI)
+- systemd with cgroup v2 (optional, for full slice awareness)
+- Rust 1.77+ (for building from source)
 
 ## Installation
 
-### Quick Install (Recommended)
+#### Quick install (recommended)
+
 ```bash
 sudo ./install.sh
 ```
 
-This will:
-- Detect existing installations and offer clean reinstall
-- Install Rust if not present
-- Install system dependencies
+The install script will:
 - Build release binaries
-- Install binaries to `/usr/local/bin`
-- Copy default config to `/etc/memsentinel.toml`
-- Install systemd service (if available)
+- Install to `/usr/local/bin`
+- Copy config to `/etc/memsentinel.toml`
+- Set up systemd service (if available)
+- Detect and offer clean reinstall if already present
 
-### Manual Install
-See "Production" usage below for manual build and deployment.
-
-### Uninstall
+To uninstall:
 ```bash
 sudo ./uninstall.sh
 ```
 
-## Usage
+#### Manual build
 
-### Quick Start
-Create your configuration file interactively:
+```bash
+cargo build --release --workspace
+sudo cp target/release/{sentinel,sentinelctl} /usr/local/bin/
+sudo cp memsentinel.toml /etc/
+```
+
+## Configuration
+
+Create config interactively:
 ```bash
 sentinelctl config init
 ```
 
-### Dev (testing)
-```bash
-# Run CLI in dev mode
-cargo run --bin sentinelctl status
-cargo run --bin sentinelctl top --limit 5
-cargo run --bin sentinelctl simulate soft --dry-run
-cargo run --bin sentinelctl config get reserve_mb
-cargo run --bin sentinelctl config init
-cargo run --bin sentinelctl reserve hold
+Or edit `/etc/memsentinel.toml` directly. Here are the key settings:
 
-# Run daemon in dev mode
-cargo run --bin sentinel
+```toml
+reserve_mb = 512              # Memory to keep reserved
+soft_threshold_pct = 15       # Release reserve at this level
+hard_threshold_pct = 5        # Start killing processes
+mode = "slow"                 # slow/kill/hybrid/watch
+
+# PSI thresholds (Linux 4.20+)
+psi_enabled = true
+psi_soft_pct = 10.0
+psi_hard_pct = 30.0
+
+# Protected services (never kill these)
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+]
 ```
 
-### Production
+**Sample configs** for different workloads are in `packaging/`:
+- `workstation.toml` — Desktop with swap
+- `server.toml` — Conservative server settings  
+- `no-swap.toml` — Aggressive thresholds for containers
+- `container-host.toml` — Docker/k8s host protection
+
+See the [tuning guide](docs/TUNING.md) for detailed explanations.
+
+## Usage
+
+Start the daemon:
 ```bash
-# Build release binaries
-cargo build --release --workspace
-
-# Run CLI
-./target/release/sentinelctl status
-./target/release/sentinelctl top --limit 5
-./target/release/sentinelctl simulate soft --dry-run
-./target/release/sentinelctl config get reserve_mb
-./target/release/sentinelctl reserve hold
-
-# Run daemon
-./target/release/sentinel
-
-# Run daemon in background (silent mode)
-./target/release/sentinel --silent
-
-# Stop daemon
-./target/release/sentinel --stop
+sudo systemctl start sentinel
 ```
 
-## Daemon Commands
-- `sentinel` — Run daemon in foreground
-- `sentinel --silent` — Run daemon in background (daemonize)
-- `sentinel --stop` — Stop running daemon
+Or run in foreground for testing:
+```bash
+sudo sentinel
+```
 
-## CLI Commands
-- `status` — Show current memory, reserve, thresholds, and pressure state
-- `top` — List top RSS processes (with exclusions)
-- `simulate` — Show what actions would be taken at soft/hard threshold
-- `config init` — Interactive wizard to create configuration file
-- `config get/set` — Get/set config keys (TOML)
-- `logs` — Stream recent actions (journald, stub)
-- `reserve` — Hold/release/rebuild reserve balloon
-- `slices` — Inspect cgroup v2 slices (stub)
+Check status:
+```bash
+sentinelctl status
+```
 
-## Systemd Integration
-- See `packaging/systemd/sentinel.service` and `sentinel.slice` for secure deployment
-- Hardening: `NoNewPrivileges`, `ProtectSystem=strict`, `OOMScoreAdjust=-1000`, etc.
+Output:
+```
+Sentinel — Status
++-----------+--------------+-----------+-----------+
+| State     | MemAvailable | Total     | Used      |
++==================================================+
+| ● Healthy | 25%          | 31.33 GiB | 23.55 GiB |
++-----------+--------------+-----------+-----------+
+
+PSI Memory Pressure:
+  some avg10: 0.00%  avg60: 0.00%  avg300: 0.00%
+  full avg10: 0.00%  avg60: 0.00%  avg300: 0.00%
+```
+
+More commands:
+```bash
+sentinelctl top --limit 10        # Show memory hogs
+sentinelctl status --json         # Machine-readable output
+sentinelctl status --watch        # Live monitoring
+sentinelctl simulate soft         # Preview actions
+sentinelctl reserve hold          # Manually hold reserve
+```
+
+## How it compares
+
+**vs kernel OOM killer**: Acts earlier, keeps system responsive, protects SSH
+
+**vs other userspace OOM daemons**: Unique reserve balloon approach + PSI + cgroup awareness
 
 ## Documentation
-- [UX Guidelines](docs/UX.md)
-- [Architecture](docs/ARCHITECTURE.md)
 
-## Example Config
-See `packaging/sentinel.example.toml` for all options and defaults.
+- **[Usage guide](docs/USAGE.md)** — Examples and workflows
+- **[Tuning guide](docs/TUNING.md)** — PSI tuning, swap scenarios, workload configs
+- **[Architecture](docs/ARCHITECTURE.md)** — How it works internally
+
+## Why "available" memory and not "free"?
+
+On Linux, "free" memory is normally close to zero because the kernel uses unused RAM for disk caches. These caches can be dropped instantly when needed.
+
+The "available" memory metric (from `/proc/meminfo` MemAvailable) accounts for this. It's the amount of memory that can be allocated without swapping.
+
+Sentinel monitors MemAvailable, not MemFree, for this reason.
+
+## Acknowledgements
+
+Sentinel's design was inspired by ideas from the broader Linux memory management ecosystem:
+
+- [earlyoom](https://github.com/rfjakob/earlyoom) — Simple, effective early OOM daemon
+- [systemd-oomd](https://www.freedesktop.org/software/systemd/man/systemd-oomd.service.html) — PSI-based OOM prevention integrated with systemd
+- [nohang](https://github.com/hakavlad/nohang) — Configurable OOM handler with diagnostics
+- [psi-notify](https://github.com/cdown/psi-notify) — PSI-based user notifications
+- [memavaild](https://github.com/hakavlad/memavaild) — Memory headroom management
+- [PSI documentation](https://docs.kernel.org/accounting/psi.html) — Kernel pressure stall information
+
 
 ## Contributing
 
-Not much to contribute to, but if you have an idea or find a bug, go for it.
+Contributions, ideas, and bug reports welcome.
 
 ## License
 
-This project is licensed under the MIT License.
-
-*Do whatever you want with it*
+MIT — see [LICENSE](LICENSE) for details.

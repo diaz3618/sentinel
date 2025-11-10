@@ -1,0 +1,38 @@
+# Sentinel configuration for desktop/workstation systems
+# Optimized for interactive responsiveness with swap available
+
+reserve_mb = 512
+soft_threshold_pct = 20
+hard_threshold_pct = 10
+mode = "slow"
+scan_interval_sec = 2
+
+exclude_names = [
+    "sshd",
+    "systemd",
+    "sentinel",
+    "Xorg",
+    "gdm",
+    "lightdm",
+]
+
+max_actions_per_min = 3
+
+# PSI is more responsive for desktop workloads
+psi_enabled = true
+psi_soft_pct = 15.0
+psi_hard_pct = 40.0
+
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+    "ssh.service",
+    "gdm.service",
+    "lightdm.service",
+    "display-manager.service",
+]
+
+[cli]
+color = "auto"
+unicode = "auto"
+table_max_width = 120

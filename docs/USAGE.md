@@ -1,103 +1,64 @@
-# Sentinel Documentation
+# Sentinel Usage Guide
 
-## Overview
-Sentinel is a Rust-based daemon and CLI tool for protecting Linux VMs from memory exhaustion. It monitors system memory, maintains a configurable reserve, and takes staged actions before the system hits Out-Of-Memory (OOM).
+← [Back to README](../README.md) | [Tuning Guide](TUNING.md) | [Architecture](ARCHITECTURE.md)
 
-## Components
-- **Daemon (`sentinel`)**: Runs in the background, monitors memory, and acts to prevent OOM.
-- **CLI (`sentinelctl`)**: Provides status, top processes, config management, logs, reserve control, and cgroup slice inspection.
-- **Config**: TOML file at `/etc/memsentinel.toml` (see example below).
+## Quick start
 
-## Installation
-### Quick Install
+1. Install:
+   ```bash
+   sudo ./install.sh
+   ```
+
+2. Configure:
+   ```bash
+   sentinelctl config init
+   ```
+
+3. Start:
+   ```bash
+   sudo systemctl start sentinel
+   ```
+
+4. Check status:
+   ```bash
+   sentinelctl status
+   ```
+
+That's it. Sentinel is now protecting your system.
+
+## Daemon operations
+
+### Using systemd (recommended)
+
 ```bash
-sudo ./install.sh
+# Start service
+sudo systemctl start sentinel
+
+# Enable on boot
+sudo systemctl enable sentinel
+
+# Check status
+sudo systemctl status sentinel
+
+# View logs
+journalctl -u sentinel -f
+
+# Reload config (SIGHUP)
+sudo systemctl reload sentinel
 ```
-This script installs Rust, dependencies, builds binaries, copies config, and sets up systemd service.
 
-**Reinstalling**: The script detects existing installations and offers a clean reinstall option that:
-- Stops and disables the service
-- Removes all binaries and systemd files
-- Optionally removes the config file
-- Cleans build artifacts
-- Performs a fresh installation
+### Manual operation
 
-### Manual Install
-Build and deploy binaries manually if needed. See README for details.
-
-## Configuration
-### Creating Configuration File
-Use the interactive wizard to create your config:
 ```bash
-sentinelctl config init
-```
-
-Example interactive session:
-```
-🔧 Sentinel Configuration Wizard
-================================
-
-📊 Memory Reserve Configuration
-Reserve memory (MB) [512]: 1024
-
-⚠️  Threshold Configuration
-Soft threshold (% available) [15]: 20
-Hard threshold (% available) [5]: 10
-
-🎯 Action Mode
-  - kill: Terminate processes aggressively
-  - slow: Pause processes with SIGSTOP
-  - hybrid: Use both strategies
-Mode (kill/slow/hybrid) [hybrid]: hybrid
-
-⏱️  Monitoring Configuration
-Scan interval (seconds) [2]: 5
-Max actions per minute [4]: 3
-
-🛡️  Protected Processes
-Current: ["sshd", "systemd", "sentinel"]
-Add more protected process names (comma-separated, or press Enter to skip): nginx,postgres
-
-✅ Configuration written to memsentinel.toml
-💡 Run: sudo mv memsentinel.toml /etc/memsentinel.toml
-```
-
-Alternatively, copy the example config:
-```bash
-sudo cp packaging/sentinel.example.toml /etc/memsentinel.toml
-```
-
-### Configuration Options
-Example config (`packaging/sentinel.example.toml`):
-```toml
-reserve_mb = 512
-soft_threshold_pct = 15
-hard_threshold_pct = 5
-mode = "hybrid"                 # "kill" | "slow" | "hybrid"
-scan_interval_sec = 2
-exclude_names = ["sshd", "systemd", "sentinel"]
-max_actions_per_min = 4
-
-[cli]
-color = "auto"                  # auto|always|never
-unicode = "auto"                # auto|always|never
-table_max_width = 120
-```
-
-## Usage
-### Daemon
-Start the daemon in foreground:
-```bash
+# Run in foreground
 sudo sentinel
-```
 
-Start the daemon in background (silent mode):
-```bash
+# Run in background
 sudo sentinel --silent
-```
 
-Stop the daemon:
-```bash
+# Stop daemon
+sudo sentinel --stop
+```
 sudo sentinel --stop
 ```
 
@@ -138,35 +99,127 @@ sentinelctl reserve hold
 sentinelctl reserve release
 sentinelctl reserve rebuild
 ```
-Inspect cgroup slices:
+## CLI commands
+
+### Check system status
 ```bash
-sentinelctl slices --tree
+sentinelctl status
+sentinelctl status --json          # Machine-readable output
+sentinelctl status --watch         # Live monitoring (refreshes every 2s)
 ```
 
-## Systemd Integration
-Example unit and slice files are in `packaging/systemd/`. Enable and start the service:
+### View memory hogs
 ```bash
-sudo systemctl enable sentinel
-sudo systemctl start sentinel
+sentinelctl top
+sentinelctl top --limit 20         # Show more processes
+sentinelctl top --json             # JSON output
 ```
 
-## Examples
-### Protect SSH from OOM
-Configure `exclude_names = ["sshd"]` to ensure SSH is not killed under memory pressure.
+### Simulate pressure response
+```bash
+sentinelctl simulate soft --dry-run
+sentinelctl simulate hard --explain    # Show scoring details
+```
 
-### Custom Reserve
-Set `reserve_mb = 1024` in config to keep 1GB always available.
+### Reserve management
+```bash
+sentinelctl reserve hold           # Hold reserve balloon
+sentinelctl reserve release        # Release reserve
+sentinelctl reserve rebuild        # Release and re-hold
+```
 
-### Hybrid Mode
-Set `mode = "hybrid"` to use both slow and kill actions based on pressure.
+### Configuration
+```bash
+sentinelctl config init            # Interactive wizard
+sentinelctl config get reserve_mb  # Get specific value
+```
+
+## Configuration file
+
+Location: `/etc/memsentinel.toml`
+
+### Basic settings
+
+```toml
+reserve_mb = 512                # Memory reserve size
+soft_threshold_pct = 15         # Release reserve at this level
+hard_threshold_pct = 5          # Start killing processes
+mode = "slow"                   # slow/kill/hybrid/watch
+scan_interval_sec = 2           # Check frequency
+max_actions_per_min = 4         # Rate limiting
+```
+
+### PSI settings (Linux 4.20+)
+
+```toml
+psi_enabled = true
+psi_soft_pct = 10.0             # Soft pressure threshold
+psi_hard_pct = 30.0             # Hard pressure threshold
+```
+
+### Protection
+
+```toml
+# Processes to never kill (by name)
+exclude_names = ["sshd", "systemd", "sentinel"]
+
+# Systemd units to protect
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+    "nginx.service",
+]
+```
+
+### Operating modes
+
+- **watch**: Monitor only, no actions
+- **slow**: Send SIGSTOP to pause processes
+- **kill**: Send SIGKILL immediately
+- **hybrid**: SIGSTOP first, then SIGKILL if needed
+
+## Common scenarios
+
+### Workstation with swap
+Use `packaging/workstation.toml`:
+- Higher thresholds (more tolerant)
+- Protects display manager
+- Moderate PSI settings
+
+### Server without swap
+Use `packaging/no-swap.toml`:
+- Lower thresholds (act faster)
+- Larger reserve
+- Aggressive PSI settings
+
+### Container host
+Use `packaging/container-host.toml`:
+- Protects Docker/containerd
+- Large reserve
+- Allows killing containers
+
+See [TUNING.md](TUNING.md) for detailed explanations.
 
 ## Troubleshooting
-- Check logs with `sentinelctl logs`.
-- Ensure config is valid TOML.
-- Use `sentinelctl status` to verify daemon is running.
 
-## Contributing
-See `docs/ARCHITECTURE.md` and `docs/UX.md` for design and UX details.
+### Daemon not starting
+```bash
+# Check logs
+journalctl -u sentinel -n 50
 
-## License
-MIT
+# Verify config
+sentinelctl config get
+
+# Check if PSI available
+cat /proc/pressure/memory
+```
+
+### Process still getting killed
+- Add to `protected_units` or `exclude_names`
+- Reload config: `sudo systemctl reload sentinel`
+- Check logs for badness scores
+
+### Too aggressive
+- Increase thresholds
+- Lower `max_actions_per_min`
+- Change mode from `kill` to `slow`

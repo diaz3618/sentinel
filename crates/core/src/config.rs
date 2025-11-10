@@ -19,7 +19,20 @@ pub struct Config {
     pub exclude_names: Vec<String>,
     pub max_actions_per_min: u32,
     pub cli: Option<CliUi>,
+    
+    #[serde(default = "default_psi_enabled")]
+    pub psi_enabled: bool,
+    #[serde(default = "default_psi_soft_pct")]
+    pub psi_soft_pct: f64,
+    #[serde(default = "default_psi_hard_pct")]
+    pub psi_hard_pct: f64,
+    #[serde(default)]
+    pub protected_units: Vec<String>,
 }
+
+fn default_psi_enabled() -> bool { true }
+fn default_psi_soft_pct() -> f64 { 10.0 }
+fn default_psi_hard_pct() -> f64 { 30.0 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -32,6 +45,10 @@ impl Default for Config {
             exclude_names: vec!["sshd".into(), "systemd".into(), "sentinel".into()],
             max_actions_per_min: 4,
             cli: Some(CliUi { color: Some("auto".into()), unicode: Some("auto".into()), table_max_width: Some(120) }),
+            psi_enabled: true,
+            psi_soft_pct: 10.0,
+            psi_hard_pct: 30.0,
+            protected_units: vec!["sshd.service".into(), "sentinel.service".into(), "ssh.service".into()],
         }
     }
 }

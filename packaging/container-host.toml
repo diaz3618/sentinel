@@ -1,0 +1,39 @@
+# Sentinel configuration for container/VM host systems
+# Protects infrastructure while allowing container workloads to be managed
+
+reserve_mb = 2048
+soft_threshold_pct = 15
+hard_threshold_pct = 8
+mode = "slow"
+scan_interval_sec = 2
+
+exclude_names = [
+    "sshd",
+    "systemd",
+    "sentinel",
+    "dockerd",
+    "containerd",
+    "kubelet",
+]
+
+max_actions_per_min = 4
+
+# PSI helps distinguish host vs container pressure
+psi_enabled = true
+psi_soft_pct = 12.0
+psi_hard_pct = 35.0
+
+# Protect infrastructure, allow containers to be killed
+protected_units = [
+    "sshd.service",
+    "sentinel.service",
+    "ssh.service",
+    "docker.service",
+    "containerd.service",
+    "kubelet.service",
+]
+
+[cli]
+color = "auto"
+unicode = "auto"
+table_max_width = 120

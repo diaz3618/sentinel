@@ -6,18 +6,53 @@ Documentation=man:sentinel(8)
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/sentinel
+
+# Service execution
 Restart=always
 RestartSec=1
-User=sentinel
+
+# User and group isolation
+# Note: DynamicUser not used to allow reading /proc entries and killing processes
+User=root
+Group=root
+
+# Security hardening
 NoNewPrivileges=true
-CapabilityBoundingSet=CAP_KILL CAP_SYS_NICE
+PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
-PrivateDevices=true
-PrivateTmp=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+PrivateDevices=false
+
+# Capabilities: only what's needed to kill processes and read proc
+CapabilityBoundingSet=CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+
+# System call filtering
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete @mount
+SystemCallErrorNumber=EPERM
+
+# File system access
+ReadWritePaths=/var/run
+ReadOnlyPaths=/proc /sys/fs/cgroup
+
+# Resource limits
+LimitNOFILE=65536
+
+# Ensure sentinel itself is protected from OOM killer
 OOMScoreAdjust=-1000
 Slice=sentinel.slice
 
 [Install]
 WantedBy=multi-user.target
+
